@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: theme("fontFamily.body");
+    color: theme("colors.ink");
+    background: theme("colors.paper");
+  }
+
+  body {
+    /* subtle paper grain */
+    background-image: radial-gradient(
+      circle at 1px 1px,
+      rgba(26, 24, 21, 0.04) 1px,
+      transparent 0
+    );
+    background-size: 24px 24px;
+  }
+
+  /* Native form elements get reset to match the editorial vibe */
+  input,
+  textarea,
+  select {
+    background: transparent;
+  }
+
+  textarea {
+    resize: vertical;
+  }
+
+  *:focus-visible {
+    outline: 2px solid theme("colors.accent");
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .label {
+    @apply font-mono text-[11px] uppercase tracking-[0.15em] text-ash;
+  }
+
+  .field {
+    @apply w-full border-b border-rule bg-transparent py-2 text-ink placeholder:text-ash/50 focus:border-ink focus:outline-none;
+  }
+
+  .field-box {
+    @apply w-full border border-rule bg-paper/40 p-3 text-ink placeholder:text-ash/50 focus:border-ink focus:outline-none;
+  }
+
+  .btn {
+    @apply inline-flex items-center gap-2 border border-ink bg-ink px-4 py-2 font-mono text-xs uppercase tracking-wider text-paper transition hover:bg-paper hover:text-ink;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 border border-rule bg-transparent px-4 py-2 font-mono text-xs uppercase tracking-wider text-ink transition hover:border-ink;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center gap-2 border border-accent bg-transparent px-4 py-2 font-mono text-xs uppercase tracking-wider text-accent transition hover:bg-accent hover:text-paper;
+  }
+}
