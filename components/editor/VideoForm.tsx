@@ -12,6 +12,7 @@ import { PlatformPanel } from "./PlatformPanel";
 import { TagsInput } from "./TagsInput";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { ChannelMultiSelect } from "@/components/ui/ChannelMultiSelect";
 
 const ALL_PLATFORMS: Platform[] = ["youtube", "instagram", "tiktok"];
 
@@ -246,6 +247,14 @@ export function VideoForm({ initial }: { initial: Video }) {
           thumbnailId={video.thumbnailId}
           onChange={(id) => update("thumbnailId", id)}
         />
+
+        <div>
+          <div className="label mb-2">Channels</div>
+          <ChannelMultiSelect
+            selected={video.channels ?? []}
+            onChange={(channels) => update("channels", channels)}
+          />
+        </div>
 
         <div>
           <div className="label mb-2">Tags</div>

@@ -154,6 +154,7 @@ export async function rebuildIndex(): Promise<number> {
     title: v.title,
     thumbnailId: v.thumbnailId,
     tagsPreview: v.tags.slice(0, 4),
+    channels: v.channels ?? [],
     updatedAt: v.updatedAt,
     scriptPreview: Object.values(v.scripts).find((s) => s?.trim())?.slice(0, 160) ?? "",
   })));

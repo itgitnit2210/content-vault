@@ -34,6 +34,7 @@ export function videoToIndexEntry(v: Video): VideoIndexEntry {
     title: v.title,
     thumbnailId: v.thumbnailId,
     tagsPreview: v.tags.slice(0, 4),
+    channels: v.channels ?? [],
     updatedAt: v.updatedAt,
     scriptPreview: firstScript.slice(0, 160),
   };

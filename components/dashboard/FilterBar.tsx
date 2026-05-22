@@ -1,12 +1,15 @@
 "use client";
 
+import { useEffect } from "react";
 import type { VideoStatus, VideoType } from "@/types/video";
 import { VIDEO_STATUSES } from "@/types/video";
+import { useSettingsStore } from "@/lib/hooks/useSettingsStore";
 
 export interface Filters {
   search: string;
   type: VideoType | "all";
   status: VideoStatus | "all";
+  channel: string | "all";
 }
 
 export function FilterBar({
@@ -20,9 +23,15 @@ export function FilterBar({
   total: number;
   showing: number;
 }) {
+  const { settings, loaded, load } = useSettingsStore();
+
+  useEffect(() => {
+    if (!loaded) load();
+  }, [loaded, load]);
+
   return (
-    <div className="mb-8 flex flex-col gap-4 border-b border-rule pb-6 md:flex-row md:items-center md:justify-between">
-      <div className="flex flex-1 flex-col gap-3 md:flex-row md:items-center md:gap-6">
+    <div className="mb-8 flex flex-col gap-4 border-b border-rule pb-6">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-6">
         <div className="relative flex-1 max-w-md">
           <input
             type="search"
@@ -38,6 +47,12 @@ export function FilterBar({
           </span>
         </div>
 
+        <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-ash md:ml-auto">
+          {showing} of {total}
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
         <div className="flex items-center gap-2">
           <span className="label">Type</span>
           {(["all", "long", "short"] as const).map((t) => (
@@ -75,11 +90,36 @@ export function FilterBar({
             ))}
           </select>
         </div>
-      </div>
 
-      <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-ash">
-        {showing} of {total}
-      </span>
+        {loaded && settings.channels.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="label">Channel</span>
+            <button
+              onClick={() => setFilters({ ...filters, channel: "all" })}
+              className={`font-mono text-[10px] uppercase tracking-[0.15em] transition ${
+                filters.channel === "all"
+                  ? "border-b border-ink text-ink"
+                  : "text-ash hover:text-ink"
+              }`}
+            >
+              all
+            </button>
+            {settings.channels.map((c) => (
+              <button
+                key={c}
+                onClick={() => setFilters({ ...filters, channel: c })}
+                className={`font-mono text-[10px] uppercase tracking-[0.15em] transition ${
+                  filters.channel === c
+                    ? "border-b border-ink text-ink"
+                    : "text-ash hover:text-ink"
+                }`}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

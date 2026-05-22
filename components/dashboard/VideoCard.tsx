@@ -70,7 +70,15 @@ export function VideoCard({ entry }: { entry: VideoIndexEntry }) {
             )}
             <div className="mt-auto flex items-center justify-between pt-4">
               <div className="flex flex-wrap gap-1">
-                {entry.tagsPreview.map((t) => (
+                {(entry.channels ?? []).slice(0, 2).map((c) => (
+                  <span
+                    key={c}
+                    className="border border-rule px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-ash"
+                  >
+                    {c}
+                  </span>
+                ))}
+                {entry.tagsPreview.slice(0, 2).map((t) => (
                   <span
                     key={t}
                     className="font-mono text-[10px] uppercase tracking-wider text-ash"

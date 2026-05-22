@@ -22,6 +22,11 @@ interface Store {
   loaded: boolean;
   load: () => void;
   create: (type: VideoType) => Promise<string>;
+  createFromIdea: (
+    type: VideoType,
+    title: string,
+    channels: string[]
+  ) => Promise<string>;
   save: (video: Video, opts?: { snapshot?: boolean }) => Promise<void>;
   remove: (id: string) => Promise<void>;
   duplicate: (id: string) => Promise<string | undefined>;
@@ -45,6 +50,19 @@ export const useVideoStore = create<Store>((set, get) => ({
 
   create: async (type) => {
     const video: Video = { ...emptyVideo(type), id: nanoid(10) };
+    await putVideo(video);
+    upsertIndexEntry(video);
+    get().load();
+    return video.id;
+  },
+
+  createFromIdea: async (type, title, channels) => {
+    const video: Video = {
+      ...emptyVideo(type),
+      id: nanoid(10),
+      title,
+      channels,
+    };
     await putVideo(video);
     upsertIndexEntry(video);
     get().load();

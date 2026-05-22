@@ -43,6 +43,7 @@ export interface Video {
   platforms: Partial<Record<Platform, PlatformContent>>;
   notes: string;
   tags: string[];
+  channels: string[];
   createdAt: string;
   updatedAt: string;
   versions?: VideoVersion[];
@@ -56,6 +57,7 @@ export interface VideoIndexEntry {
   title: string;
   thumbnailId?: string;
   tagsPreview: string[];
+  channels: string[];
   updatedAt: string;
   scriptPreview: string;
 }
@@ -74,6 +76,7 @@ export function emptyVideo(type: VideoType): Video {
         : { instagram: { caption: "" } },
     notes: "",
     tags: [],
+    channels: [],
     createdAt: now,
     updatedAt: now,
   };

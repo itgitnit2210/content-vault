@@ -33,6 +33,7 @@ export const videoSchema = z.object({
   }),
   notes: z.string(),
   tags: z.array(z.string()),
+  channels: z.array(z.string()).default([]),
   createdAt: z.string(),
   updatedAt: z.string(),
   versions: z.array(z.any()).optional(),

@@ -19,6 +19,7 @@ export default function DashboardPage() {
     search: "",
     type: "all",
     status: "all",
+    channel: "all",
   });
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -32,6 +33,11 @@ export default function DashboardPage() {
     return index.filter((v) => {
       if (filters.type !== "all" && v.type !== filters.type) return false;
       if (filters.status !== "all" && v.status !== filters.status)
+        return false;
+      if (
+        filters.channel !== "all" &&
+        !(v.channels ?? []).includes(filters.channel)
+      )
         return false;
       if (!q) return true;
       return (
@@ -75,7 +81,7 @@ export default function DashboardPage() {
 
   return (
     <PageShell
-      title="Content Vault"
+      title="Vault"
       subtitle="Scripts, captions, thumbnails. One workshop for everything that's not yet on camera."
       actions={
         <>
