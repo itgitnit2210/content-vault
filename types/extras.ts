@@ -4,6 +4,7 @@ export interface Idea {
   title: string;
   channels: string[];
   notes?: string;
+  order: number;
   createdAt: string;
   updatedAt: string;
 }

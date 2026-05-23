@@ -11,7 +11,18 @@ function readIdeas(): Idea[] {
   try {
     const raw = localStorage.getItem(IDEAS_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as Idea[];
+    const parsed = JSON.parse(raw) as Idea[];
+    // Migration: older ideas may not have an `order` field. Assign by current array position.
+    let needsMigration = false;
+    const migrated = parsed.map((idea, i) => {
+      if (typeof idea.order !== "number") {
+        needsMigration = true;
+        return { ...idea, order: i };
+      }
+      return idea;
+    });
+    if (needsMigration) writeIdeas(migrated);
+    return migrated;
   } catch {
     return [];
   }
@@ -25,6 +36,16 @@ function writeIdeas(ideas: Idea[]) {
   }
 }
 
+/**
+ * Recompute order values so they're a clean 0,1,2,... sequence.
+ * Run after every reorder to keep numbers from drifting into the millions.
+ */
+function normalizeOrder(ideas: Idea[]): Idea[] {
+  return [...ideas]
+    .sort((a, b) => a.order - b.order)
+    .map((idea, i) => ({ ...idea, order: i }));
+}
+
 interface IdeasStore {
   ideas: Idea[];
   loaded: boolean;
@@ -36,6 +57,10 @@ interface IdeasStore {
   ) => string;
   update: (id: string, patch: Partial<Omit<Idea, "id" | "createdAt">>) => void;
   remove: (id: string) => void;
+  moveUp: (id: string) => void;
+  moveDown: (id: string) => void;
+  moveToTop: (id: string) => void;
+  moveToBottom: (id: string) => void;
 }
 
 export const useIdeasStore = create<IdeasStore>((set, get) => ({
@@ -44,24 +69,23 @@ export const useIdeasStore = create<IdeasStore>((set, get) => ({
 
   load: () => {
     const ideas = readIdeas();
-    ideas.sort(
-      (a, b) =>
-        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-    );
+    ideas.sort((a, b) => a.order - b.order);
     set({ ideas, loaded: true });
   },
 
   create: (type, title = "", channels = []) => {
     const now = new Date().toISOString();
+    // New ideas go to the top (order = -1, then normalize)
     const idea: Idea = {
       id: nanoid(10),
       type,
       title,
       channels,
+      order: -1,
       createdAt: now,
       updatedAt: now,
     };
-    const next = [idea, ...get().ideas];
+    const next = normalizeOrder([idea, ...get().ideas]);
     writeIdeas(next);
     set({ ideas: next });
     return idea.id;
@@ -78,7 +102,48 @@ export const useIdeasStore = create<IdeasStore>((set, get) => ({
   },
 
   remove: (id) => {
-    const next = get().ideas.filter((i) => i.id !== id);
+    const next = normalizeOrder(get().ideas.filter((i) => i.id !== id));
+    writeIdeas(next);
+    set({ ideas: next });
+  },
+
+  moveUp: (id) => {
+    const ideas = [...get().ideas].sort((a, b) => a.order - b.order);
+    const idx = ideas.findIndex((i) => i.id === id);
+    if (idx <= 0) return;
+    [ideas[idx - 1], ideas[idx]] = [ideas[idx], ideas[idx - 1]];
+    const next = normalizeOrder(ideas);
+    writeIdeas(next);
+    set({ ideas: next });
+  },
+
+  moveDown: (id) => {
+    const ideas = [...get().ideas].sort((a, b) => a.order - b.order);
+    const idx = ideas.findIndex((i) => i.id === id);
+    if (idx < 0 || idx >= ideas.length - 1) return;
+    [ideas[idx], ideas[idx + 1]] = [ideas[idx + 1], ideas[idx]];
+    const next = normalizeOrder(ideas);
+    writeIdeas(next);
+    set({ ideas: next });
+  },
+
+  moveToTop: (id) => {
+    const target = get().ideas.find((i) => i.id === id);
+    if (!target) return;
+    const others = get().ideas.filter((i) => i.id !== id);
+    const next = normalizeOrder([{ ...target, order: -1 }, ...others]);
+    writeIdeas(next);
+    set({ ideas: next });
+  },
+
+  moveToBottom: (id) => {
+    const target = get().ideas.find((i) => i.id === id);
+    if (!target) return;
+    const others = get().ideas.filter((i) => i.id !== id);
+    const next = normalizeOrder([
+      ...others,
+      { ...target, order: Number.MAX_SAFE_INTEGER },
+    ]);
     writeIdeas(next);
     set({ ideas: next });
   },

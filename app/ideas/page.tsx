@@ -12,7 +12,18 @@ import type { Idea } from "@/types/extras";
 
 export default function IdeasPage() {
   const router = useRouter();
-  const { ideas, loaded, load, create, update, remove } = useIdeasStore();
+  const {
+    ideas,
+    loaded,
+    load,
+    create,
+    update,
+    remove,
+    moveUp,
+    moveDown,
+    moveToTop,
+    moveToBottom,
+  } = useIdeasStore();
   const { createFromIdea } = useVideoStore();
   const { settings, loaded: settingsLoaded, load: loadSettings } =
     useSettingsStore();
@@ -28,6 +39,9 @@ export default function IdeasPage() {
     load();
     if (!settingsLoaded) loadSettings();
   }, [load, loadSettings, settingsLoaded]);
+
+  const filtersActive =
+    typeFilter !== "all" || channelFilter !== "all" || search.trim() !== "";
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -53,7 +67,7 @@ export default function IdeasPage() {
   return (
     <PageShell
       title="Ideas"
-      subtitle="Titles, hooks, half-formed thoughts. Park them here until they're ready."
+      subtitle="Titles, hooks, half-formed thoughts. Park them here until they're ready. Top of the list = highest priority."
       actions={
         <>
           <button
@@ -131,6 +145,11 @@ export default function IdeasPage() {
             </div>
           )}
         </div>
+        {filtersActive && (
+          <p className="font-mono text-[10px] uppercase tracking-[0.15em] text-ash">
+            Reordering is disabled while filters are active. Clear filters to set priority.
+          </p>
+        )}
       </div>
 
       {!loaded ? (
@@ -145,20 +164,28 @@ export default function IdeasPage() {
           No ideas match the current filters.
         </p>
       ) : (
-        <div className="divide-y divide-rule border-y border-rule">
-          {filtered.map((idea) => (
+        <ol className="divide-y divide-rule border-y border-rule">
+          {filtered.map((idea, idx) => (
             <IdeaRow
               key={idea.id}
               idea={idea}
+              position={idx + 1}
+              isFirst={idx === 0}
+              isLast={idx === filtered.length - 1}
+              reorderEnabled={!filtersActive}
               editing={editing === idea.id}
               onStartEdit={() => setEditing(idea.id)}
               onStopEdit={() => setEditing(null)}
               onUpdate={(patch) => update(idea.id, patch)}
               onDelete={() => remove(idea.id)}
               onConvert={() => handleConvert(idea)}
+              onMoveUp={() => moveUp(idea.id)}
+              onMoveDown={() => moveDown(idea.id)}
+              onMoveToTop={() => moveToTop(idea.id)}
+              onMoveToBottom={() => moveToBottom(idea.id)}
             />
           ))}
-        </div>
+        </ol>
       )}
     </PageShell>
   );
@@ -166,62 +193,131 @@ export default function IdeasPage() {
 
 function IdeaRow({
   idea,
+  position,
+  isFirst,
+  isLast,
+  reorderEnabled,
   editing,
   onStartEdit,
   onStopEdit,
   onUpdate,
   onDelete,
   onConvert,
+  onMoveUp,
+  onMoveDown,
+  onMoveToTop,
+  onMoveToBottom,
 }: {
   idea: Idea;
+  position: number;
+  isFirst: boolean;
+  isLast: boolean;
+  reorderEnabled: boolean;
   editing: boolean;
   onStartEdit: () => void;
   onStopEdit: () => void;
   onUpdate: (patch: Partial<Omit<Idea, "id" | "createdAt">>) => void;
   onDelete: () => void;
   onConvert: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onMoveToTop: () => void;
+  onMoveToBottom: () => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  const arrowClass =
+    "flex h-7 w-7 items-center justify-center border border-rule text-ash transition hover:border-ink hover:text-ink disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-rule disabled:hover:text-ash";
+
   return (
     <>
-      <div className="grid grid-cols-1 gap-3 py-4 md:grid-cols-[80px_1fr_auto] md:items-start md:gap-6">
-        <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-ash">
-          {idea.type}
-        </span>
-
-        <div className="space-y-2">
-          {editing ? (
-            <input
-              autoFocus
-              value={idea.title}
-              onChange={(e) => onUpdate({ title: e.target.value })}
-              onBlur={onStopEdit}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === "Escape") onStopEdit();
-              }}
-              placeholder="What's the idea?"
-              className="w-full bg-transparent font-display text-2xl font-medium leading-tight tracking-tight placeholder:text-ash/50 focus:outline-none"
-            />
-          ) : (
+      <li className="grid grid-cols-[auto_1fr_auto] items-start gap-4 py-4 md:gap-6">
+        {/* Priority controls + position */}
+        <div className="flex flex-col items-center gap-1">
+          <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-ash">
+            #{position}
+          </span>
+          <div className="flex flex-col gap-1">
             <button
-              onClick={onStartEdit}
-              className="text-left font-display text-2xl font-medium leading-tight tracking-tight hover:text-accent"
+              type="button"
+              onClick={onMoveToTop}
+              disabled={!reorderEnabled || isFirst}
+              className={arrowClass}
+              aria-label="Move to top"
+              title="Move to top"
             >
-              {idea.title || (
-                <span className="italic text-ash">Untitled idea…</span>
-              )}
+              ⇈
             </button>
-          )}
-          <div className="flex flex-wrap items-center gap-2">
-            <ChannelMultiSelect
-              selected={idea.channels}
-              onChange={(channels) => onUpdate({ channels })}
-            />
+            <button
+              type="button"
+              onClick={onMoveUp}
+              disabled={!reorderEnabled || isFirst}
+              className={arrowClass}
+              aria-label="Move up"
+              title="Move up"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              onClick={onMoveDown}
+              disabled={!reorderEnabled || isLast}
+              className={arrowClass}
+              aria-label="Move down"
+              title="Move down"
+            >
+              ↓
+            </button>
+            <button
+              type="button"
+              onClick={onMoveToBottom}
+              disabled={!reorderEnabled || isLast}
+              className={arrowClass}
+              aria-label="Move to bottom"
+              title="Move to bottom"
+            >
+              ⇊
+            </button>
           </div>
         </div>
 
-        <div className="flex shrink-0 gap-2 md:flex-col md:items-end">
+        {/* Main content */}
+        <div className="space-y-2 min-w-0">
+          <div className="flex items-baseline gap-3">
+            <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-ash shrink-0">
+              {idea.type}
+            </span>
+            {editing ? (
+              <input
+                autoFocus
+                value={idea.title}
+                onChange={(e) => onUpdate({ title: e.target.value })}
+                onBlur={onStopEdit}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === "Escape") onStopEdit();
+                }}
+                placeholder="What's the idea?"
+                className="w-full bg-transparent font-display text-2xl font-medium leading-tight tracking-tight placeholder:text-ash/50 focus:outline-none"
+              />
+            ) : (
+              <button
+                onClick={onStartEdit}
+                className="text-left font-display text-2xl font-medium leading-tight tracking-tight hover:text-accent"
+              >
+                {idea.title || (
+                  <span className="italic text-ash">Untitled idea…</span>
+                )}
+              </button>
+            )}
+          </div>
+          <ChannelMultiSelect
+            selected={idea.channels}
+            onChange={(channels) => onUpdate({ channels })}
+          />
+        </div>
+
+        {/* Actions */}
+        <div className="flex shrink-0 flex-col items-end gap-2">
           <button onClick={onConvert} className="btn-ghost">
             → Video
           </button>
@@ -232,7 +328,7 @@ function IdeaRow({
             Delete
           </button>
         </div>
-      </div>
+      </li>
 
       <ConfirmDialog
         open={confirmDelete}
