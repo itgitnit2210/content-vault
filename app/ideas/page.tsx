@@ -10,6 +10,8 @@ import { ChannelMultiSelect } from "@/components/ui/ChannelMultiSelect";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import type { Idea } from "@/types/extras";
 
+const PAGE_SIZE = 20;
+
 export default function IdeasPage() {
   const router = useRouter();
   const {
@@ -34,6 +36,7 @@ export default function IdeasPage() {
   const [channelFilter, setChannelFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     load();
@@ -42,6 +45,11 @@ export default function IdeasPage() {
 
   const filtersActive =
     typeFilter !== "all" || channelFilter !== "all" || search.trim() !== "";
+
+  // Reset to page 1 whenever filters change
+  useEffect(() => {
+    setPage(1);
+  }, [typeFilter, channelFilter, search]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -54,6 +62,13 @@ export default function IdeasPage() {
     });
   }, [ideas, typeFilter, channelFilter, search]);
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  // Clamp page if list shrinks below current page
+  const currentPage = Math.min(page, totalPages);
+
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
+  const pageItems = filtered.slice(pageStart, pageStart + PAGE_SIZE);
+
   const handleConvert = async (idea: Idea) => {
     if (!idea.title.trim()) {
       alert("Add a title before converting to a video.");
@@ -62,6 +77,31 @@ export default function IdeasPage() {
     const id = await createFromIdea(idea.type, idea.title, idea.channels);
     remove(idea.id);
     router.push(`/videos/${id}`);
+  };
+
+  // When moving across page boundaries, follow the idea to its new page
+  const handleMoveUp = (ideaId: string, indexOnPage: number) => {
+    moveUp(ideaId);
+    if (indexOnPage === 0 && currentPage > 1) {
+      setPage(currentPage - 1);
+    }
+  };
+
+  const handleMoveDown = (ideaId: string, indexOnPage: number) => {
+    moveDown(ideaId);
+    if (indexOnPage === pageItems.length - 1 && currentPage < totalPages) {
+      setPage(currentPage + 1);
+    }
+  };
+
+  const handleMoveToTop = (ideaId: string) => {
+    moveToTop(ideaId);
+    setPage(1);
+  };
+
+  const handleMoveToBottom = (ideaId: string) => {
+    moveToBottom(ideaId);
+    setPage(totalPages);
   };
 
   return (
@@ -74,6 +114,7 @@ export default function IdeasPage() {
             onClick={() => {
               const id = create("short");
               setEditing(id);
+              setPage(1);
             }}
             className="btn-ghost"
           >
@@ -83,6 +124,7 @@ export default function IdeasPage() {
             onClick={() => {
               const id = create("long");
               setEditing(id);
+              setPage(1);
             }}
             className="btn"
           >
@@ -164,31 +206,149 @@ export default function IdeasPage() {
           No ideas match the current filters.
         </p>
       ) : (
-        <ol className="divide-y divide-rule border-y border-rule">
-          {filtered.map((idea, idx) => (
-            <IdeaRow
-              key={idea.id}
-              idea={idea}
-              position={idx + 1}
-              isFirst={idx === 0}
-              isLast={idx === filtered.length - 1}
-              reorderEnabled={!filtersActive}
-              editing={editing === idea.id}
-              onStartEdit={() => setEditing(idea.id)}
-              onStopEdit={() => setEditing(null)}
-              onUpdate={(patch) => update(idea.id, patch)}
-              onDelete={() => remove(idea.id)}
-              onConvert={() => handleConvert(idea)}
-              onMoveUp={() => moveUp(idea.id)}
-              onMoveDown={() => moveDown(idea.id)}
-              onMoveToTop={() => moveToTop(idea.id)}
-              onMoveToBottom={() => moveToBottom(idea.id)}
+        <>
+          <ol className="divide-y divide-rule border-y border-rule">
+            {pageItems.map((idea, idx) => {
+              const globalPosition = pageStart + idx + 1;
+              const isAbsoluteFirst = globalPosition === 1;
+              const isAbsoluteLast = globalPosition === filtered.length;
+              return (
+                <IdeaRow
+                  key={idea.id}
+                  idea={idea}
+                  position={globalPosition}
+                  isFirst={isAbsoluteFirst}
+                  isLast={isAbsoluteLast}
+                  reorderEnabled={!filtersActive}
+                  editing={editing === idea.id}
+                  onStartEdit={() => setEditing(idea.id)}
+                  onStopEdit={() => setEditing(null)}
+                  onUpdate={(patch) => update(idea.id, patch)}
+                  onDelete={() => remove(idea.id)}
+                  onConvert={() => handleConvert(idea)}
+                  onMoveUp={() => handleMoveUp(idea.id, idx)}
+                  onMoveDown={() => handleMoveDown(idea.id, idx)}
+                  onMoveToTop={() => handleMoveToTop(idea.id)}
+                  onMoveToBottom={() => handleMoveToBottom(idea.id)}
+                />
+              );
+            })}
+          </ol>
+
+          {totalPages > 1 && (
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={filtered.length}
+              pageSize={PAGE_SIZE}
+              onPageChange={setPage}
             />
-          ))}
-        </ol>
+          )}
+        </>
       )}
     </PageShell>
   );
+}
+
+function Pagination({
+  currentPage,
+  totalPages,
+  totalItems,
+  pageSize,
+  onPageChange,
+}: {
+  currentPage: number;
+  totalPages: number;
+  totalItems: number;
+  pageSize: number;
+  onPageChange: (p: number) => void;
+}) {
+  const pages = buildPageList(currentPage, totalPages);
+  const start = (currentPage - 1) * pageSize + 1;
+  const end = Math.min(currentPage * pageSize, totalItems);
+
+  return (
+    <nav
+      className="mt-8 flex flex-col gap-3 border-t border-rule pt-6 md:flex-row md:items-center md:justify-between"
+      aria-label="Pagination"
+    >
+      <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-ash">
+        Showing {start}–{end} of {totalItems}
+      </span>
+
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage === 1}
+          className="border border-rule px-3 py-1 font-mono text-[10px] uppercase tracking-[0.15em] text-ash transition hover:border-ink hover:text-ink disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-rule disabled:hover:text-ash"
+          aria-label="Previous page"
+        >
+          ← Prev
+        </button>
+
+        {pages.map((p, i) =>
+          p === "…" ? (
+            <span
+              key={`gap-${i}`}
+              className="px-2 font-mono text-[10px] text-ash"
+            >
+              …
+            </span>
+          ) : (
+            <button
+              key={p}
+              onClick={() => onPageChange(p)}
+              className={`min-w-[2rem] border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.15em] transition ${
+                p === currentPage
+                  ? "border-ink bg-ink text-paper"
+                  : "border-rule text-ash hover:border-ink hover:text-ink"
+              }`}
+              aria-label={`Page ${p}`}
+              aria-current={p === currentPage ? "page" : undefined}
+            >
+              {p}
+            </button>
+          )
+        )}
+
+        <button
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage === totalPages}
+          className="border border-rule px-3 py-1 font-mono text-[10px] uppercase tracking-[0.15em] text-ash transition hover:border-ink hover:text-ink disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-rule disabled:hover:text-ash"
+          aria-label="Next page"
+        >
+          Next →
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+/**
+ * Returns a compact list of page numbers with ellipses.
+ * e.g. for currentPage=7, totalPages=15 → [1, "…", 6, 7, 8, "…", 15]
+ */
+function buildPageList(
+  current: number,
+  total: number
+): (number | "…")[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+
+  const pages: (number | "…")[] = [];
+  pages.push(1);
+
+  if (current > 3) pages.push("…");
+
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  for (let i = start; i <= end; i++) pages.push(i);
+
+  if (current < total - 2) pages.push("…");
+
+  pages.push(total);
+  return pages;
 }
 
 function IdeaRow({
@@ -232,7 +392,6 @@ function IdeaRow({
   return (
     <>
       <li className="grid grid-cols-[auto_1fr_auto] items-start gap-4 py-4 md:gap-6">
-        {/* Priority controls + position */}
         <div className="flex flex-col items-center gap-1">
           <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-ash">
             #{position}
@@ -281,7 +440,6 @@ function IdeaRow({
           </div>
         </div>
 
-        {/* Main content */}
         <div className="space-y-2 min-w-0">
           <div className="flex items-baseline gap-3">
             <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-ash shrink-0">
@@ -316,7 +474,6 @@ function IdeaRow({
           />
         </div>
 
-        {/* Actions */}
         <div className="flex shrink-0 flex-col items-end gap-2">
           <button onClick={onConvert} className="btn-ghost">
             → Video

@@ -12,17 +12,31 @@ function readIdeas(): Idea[] {
     const raw = localStorage.getItem(IDEAS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as Idea[];
-    // Migration: older ideas may not have an `order` field. Assign by current array position.
-    let needsMigration = false;
-    const migrated = parsed.map((idea, i) => {
-      if (typeof idea.order !== "number") {
-        needsMigration = true;
-        return { ...idea, order: i };
-      }
-      return idea;
-    });
-    if (needsMigration) writeIdeas(migrated);
-    return migrated;
+    if (!Array.isArray(parsed)) return [];
+
+    // Heal stale/duplicate/missing order values.
+    // Sort by existing order (treating missing as Infinity = end of list),
+    // then assign clean sequential numbers.
+    const healed = [...parsed]
+      .sort((a, b) => {
+        const ao = typeof a.order === "number" ? a.order : Number.MAX_SAFE_INTEGER;
+        const bo = typeof b.order === "number" ? b.order : Number.MAX_SAFE_INTEGER;
+        if (ao !== bo) return ao - bo;
+        // Tie-break by updatedAt descending so newer items rank higher
+        return (
+          new Date(b.updatedAt || 0).getTime() -
+          new Date(a.updatedAt || 0).getTime()
+        );
+      })
+      .map((idea, i) => ({ ...idea, order: i }));
+
+    // Only write back if anything actually changed
+    const changed =
+      healed.length !== parsed.length ||
+      healed.some((h, i) => h.order !== parsed[i]?.order);
+    if (changed) writeIdeas(healed);
+
+    return healed;
   } catch {
     return [];
   }
@@ -37,13 +51,12 @@ function writeIdeas(ideas: Idea[]) {
 }
 
 /**
- * Recompute order values so they're a clean 0,1,2,... sequence.
- * Run after every reorder to keep numbers from drifting into the millions.
+ * Recompute order values so they're a clean 0,1,2,... sequence based on
+ * current array position (not stored order). Caller is responsible for
+ * arranging the array in the desired order before passing it in.
  */
 function normalizeOrder(ideas: Idea[]): Idea[] {
-  return [...ideas]
-    .sort((a, b) => a.order - b.order)
-    .map((idea, i) => ({ ...idea, order: i }));
+  return ideas.map((idea, i) => ({ ...idea, order: i }));
 }
 
 interface IdeasStore {
@@ -68,27 +81,26 @@ export const useIdeasStore = create<IdeasStore>((set, get) => ({
   loaded: false,
 
   load: () => {
-    const ideas = readIdeas();
-    ideas.sort((a, b) => a.order - b.order);
-    set({ ideas, loaded: true });
+    // readIdeas() already returns a healed, order-sorted array
+    set({ ideas: readIdeas(), loaded: true });
   },
 
   create: (type, title = "", channels = []) => {
     const now = new Date().toISOString();
-    // New ideas go to the top (order = -1, then normalize)
-    const idea: Idea = {
+    const newIdea: Idea = {
       id: nanoid(10),
       type,
       title,
       channels,
-      order: -1,
+      order: 0, // will be set by normalizeOrder
       createdAt: now,
       updatedAt: now,
     };
-    const next = normalizeOrder([idea, ...get().ideas]);
+    // New ideas go to the top of the list
+    const next = normalizeOrder([newIdea, ...get().ideas]);
     writeIdeas(next);
     set({ ideas: next });
-    return idea.id;
+    return newIdea.id;
   },
 
   update: (id, patch) => {
@@ -108,9 +120,10 @@ export const useIdeasStore = create<IdeasStore>((set, get) => ({
   },
 
   moveUp: (id) => {
-    const ideas = [...get().ideas].sort((a, b) => a.order - b.order);
+    const ideas = [...get().ideas];
     const idx = ideas.findIndex((i) => i.id === id);
     if (idx <= 0) return;
+    // Swap positions in the array
     [ideas[idx - 1], ideas[idx]] = [ideas[idx], ideas[idx - 1]];
     const next = normalizeOrder(ideas);
     writeIdeas(next);
@@ -118,7 +131,7 @@ export const useIdeasStore = create<IdeasStore>((set, get) => ({
   },
 
   moveDown: (id) => {
-    const ideas = [...get().ideas].sort((a, b) => a.order - b.order);
+    const ideas = [...get().ideas];
     const idx = ideas.findIndex((i) => i.id === id);
     if (idx < 0 || idx >= ideas.length - 1) return;
     [ideas[idx], ideas[idx + 1]] = [ideas[idx + 1], ideas[idx]];
@@ -128,22 +141,23 @@ export const useIdeasStore = create<IdeasStore>((set, get) => ({
   },
 
   moveToTop: (id) => {
-    const target = get().ideas.find((i) => i.id === id);
-    if (!target) return;
-    const others = get().ideas.filter((i) => i.id !== id);
-    const next = normalizeOrder([{ ...target, order: -1 }, ...others]);
+    const ideas = [...get().ideas];
+    const idx = ideas.findIndex((i) => i.id === id);
+    if (idx <= 0) return;
+    const [target] = ideas.splice(idx, 1);
+    ideas.unshift(target);
+    const next = normalizeOrder(ideas);
     writeIdeas(next);
     set({ ideas: next });
   },
 
   moveToBottom: (id) => {
-    const target = get().ideas.find((i) => i.id === id);
-    if (!target) return;
-    const others = get().ideas.filter((i) => i.id !== id);
-    const next = normalizeOrder([
-      ...others,
-      { ...target, order: Number.MAX_SAFE_INTEGER },
-    ]);
+    const ideas = [...get().ideas];
+    const idx = ideas.findIndex((i) => i.id === id);
+    if (idx < 0 || idx >= ideas.length - 1) return;
+    const [target] = ideas.splice(idx, 1);
+    ideas.push(target);
+    const next = normalizeOrder(ideas);
     writeIdeas(next);
     set({ ideas: next });
   },
