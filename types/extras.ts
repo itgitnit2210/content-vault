@@ -5,6 +5,8 @@ export interface Idea {
   channels: string[];
   notes?: string;
   order: number;
+  done?: boolean;
+  doneAt?: string;
   createdAt: string;
   updatedAt: string;
 }

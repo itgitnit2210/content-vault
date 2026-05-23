@@ -21,6 +21,7 @@ export default function IdeasPage() {
     create,
     update,
     remove,
+    toggleDone,
     moveUp,
     moveDown,
     moveToTop,
@@ -35,6 +36,7 @@ export default function IdeasPage() {
   );
   const [channelFilter, setChannelFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
+  const [hideDone, setHideDone] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [page, setPage] = useState(1);
 
@@ -44,30 +46,34 @@ export default function IdeasPage() {
   }, [load, loadSettings, settingsLoaded]);
 
   const filtersActive =
-    typeFilter !== "all" || channelFilter !== "all" || search.trim() !== "";
+    typeFilter !== "all" ||
+    channelFilter !== "all" ||
+    search.trim() !== "" ||
+    hideDone;
 
-  // Reset to page 1 whenever filters change
   useEffect(() => {
     setPage(1);
-  }, [typeFilter, channelFilter, search]);
+  }, [typeFilter, channelFilter, search, hideDone]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return ideas.filter((i) => {
+      if (hideDone && i.done) return false;
       if (typeFilter !== "all" && i.type !== typeFilter) return false;
       if (channelFilter !== "all" && !i.channels.includes(channelFilter))
         return false;
       if (q && !i.title.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [ideas, typeFilter, channelFilter, search]);
+  }, [ideas, typeFilter, channelFilter, search, hideDone]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  // Clamp page if list shrinks below current page
   const currentPage = Math.min(page, totalPages);
-
   const pageStart = (currentPage - 1) * PAGE_SIZE;
   const pageItems = filtered.slice(pageStart, pageStart + PAGE_SIZE);
+
+  const doneCount = ideas.filter((i) => i.done).length;
+  const activeCount = ideas.length - doneCount;
 
   const handleConvert = async (idea: Idea) => {
     if (!idea.title.trim()) {
@@ -75,16 +81,14 @@ export default function IdeasPage() {
       return;
     }
     const id = await createFromIdea(idea.type, idea.title, idea.channels);
-    remove(idea.id);
+    // Mark the idea done instead of deleting
+    if (!idea.done) toggleDone(idea.id);
     router.push(`/videos/${id}`);
   };
 
-  // When moving across page boundaries, follow the idea to its new page
   const handleMoveUp = (ideaId: string, indexOnPage: number) => {
     moveUp(ideaId);
-    if (indexOnPage === 0 && currentPage > 1) {
-      setPage(currentPage - 1);
-    }
+    if (indexOnPage === 0 && currentPage > 1) setPage(currentPage - 1);
   };
 
   const handleMoveDown = (ideaId: string, indexOnPage: number) => {
@@ -107,7 +111,7 @@ export default function IdeasPage() {
   return (
     <PageShell
       title="Ideas"
-      subtitle="Titles, hooks, half-formed thoughts. Park them here until they're ready. Top of the list = highest priority."
+      subtitle="Titles, hooks, half-formed thoughts. Top of the list = highest priority. Done ones sink to the bottom."
       actions={
         <>
           <button
@@ -186,10 +190,34 @@ export default function IdeasPage() {
               ))}
             </div>
           )}
+          <div className="flex items-center gap-2">
+            <span className="label">Done</span>
+            <button
+              onClick={() => setHideDone(false)}
+              className={`font-mono text-[10px] uppercase tracking-[0.15em] transition ${
+                !hideDone
+                  ? "border-b border-ink text-ink"
+                  : "text-ash hover:text-ink"
+              }`}
+            >
+              show ({doneCount})
+            </button>
+            <button
+              onClick={() => setHideDone(true)}
+              className={`font-mono text-[10px] uppercase tracking-[0.15em] transition ${
+                hideDone
+                  ? "border-b border-ink text-ink"
+                  : "text-ash hover:text-ink"
+              }`}
+            >
+              hide
+            </button>
+          </div>
         </div>
         {filtersActive && (
           <p className="font-mono text-[10px] uppercase tracking-[0.15em] text-ash">
-            Reordering is disabled while filters are active. Clear filters to set priority.
+            Reordering is disabled while filters are active.{" "}
+            {activeCount} active · {doneCount} done.
           </p>
         )}
       </div>
@@ -210,21 +238,20 @@ export default function IdeasPage() {
           <ol className="divide-y divide-rule border-y border-rule">
             {pageItems.map((idea, idx) => {
               const globalPosition = pageStart + idx + 1;
-              const isAbsoluteFirst = globalPosition === 1;
-              const isAbsoluteLast = globalPosition === filtered.length;
               return (
                 <IdeaRow
                   key={idea.id}
                   idea={idea}
                   position={globalPosition}
-                  isFirst={isAbsoluteFirst}
-                  isLast={isAbsoluteLast}
+                  isFirst={globalPosition === 1}
+                  isLast={globalPosition === filtered.length}
                   reorderEnabled={!filtersActive}
                   editing={editing === idea.id}
                   onStartEdit={() => setEditing(idea.id)}
                   onStopEdit={() => setEditing(null)}
                   onUpdate={(patch) => update(idea.id, patch)}
                   onDelete={() => remove(idea.id)}
+                  onToggleDone={() => toggleDone(idea.id)}
                   onConvert={() => handleConvert(idea)}
                   onMoveUp={() => handleMoveUp(idea.id, idx)}
                   onMoveDown={() => handleMoveDown(idea.id, idx)}
@@ -275,23 +302,17 @@ function Pagination({
       <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-ash">
         Showing {start}–{end} of {totalItems}
       </span>
-
       <div className="flex items-center gap-1">
         <button
           onClick={() => onPageChange(currentPage - 1)}
           disabled={currentPage === 1}
           className="border border-rule px-3 py-1 font-mono text-[10px] uppercase tracking-[0.15em] text-ash transition hover:border-ink hover:text-ink disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-rule disabled:hover:text-ash"
-          aria-label="Previous page"
         >
           ← Prev
         </button>
-
         {pages.map((p, i) =>
           p === "…" ? (
-            <span
-              key={`gap-${i}`}
-              className="px-2 font-mono text-[10px] text-ash"
-            >
+            <span key={`gap-${i}`} className="px-2 font-mono text-[10px] text-ash">
               …
             </span>
           ) : (
@@ -303,19 +324,16 @@ function Pagination({
                   ? "border-ink bg-ink text-paper"
                   : "border-rule text-ash hover:border-ink hover:text-ink"
               }`}
-              aria-label={`Page ${p}`}
               aria-current={p === currentPage ? "page" : undefined}
             >
               {p}
             </button>
           )
         )}
-
         <button
           onClick={() => onPageChange(currentPage + 1)}
           disabled={currentPage === totalPages}
           className="border border-rule px-3 py-1 font-mono text-[10px] uppercase tracking-[0.15em] text-ash transition hover:border-ink hover:text-ink disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-rule disabled:hover:text-ash"
-          aria-label="Next page"
         >
           Next →
         </button>
@@ -324,29 +342,17 @@ function Pagination({
   );
 }
 
-/**
- * Returns a compact list of page numbers with ellipses.
- * e.g. for currentPage=7, totalPages=15 → [1, "…", 6, 7, 8, "…", 15]
- */
-function buildPageList(
-  current: number,
-  total: number
-): (number | "…")[] {
+function buildPageList(current: number, total: number): (number | "…")[] {
   if (total <= 7) {
     return Array.from({ length: total }, (_, i) => i + 1);
   }
-
   const pages: (number | "…")[] = [];
   pages.push(1);
-
   if (current > 3) pages.push("…");
-
   const start = Math.max(2, current - 1);
   const end = Math.min(total - 1, current + 1);
   for (let i = start; i <= end; i++) pages.push(i);
-
   if (current < total - 2) pages.push("…");
-
   pages.push(total);
   return pages;
 }
@@ -362,6 +368,7 @@ function IdeaRow({
   onStopEdit,
   onUpdate,
   onDelete,
+  onToggleDone,
   onConvert,
   onMoveUp,
   onMoveDown,
@@ -378,6 +385,7 @@ function IdeaRow({
   onStopEdit: () => void;
   onUpdate: (patch: Partial<Omit<Idea, "id" | "createdAt">>) => void;
   onDelete: () => void;
+  onToggleDone: () => void;
   onConvert: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
@@ -389,9 +397,13 @@ function IdeaRow({
   const arrowClass =
     "flex h-7 w-7 items-center justify-center border border-rule text-ash transition hover:border-ink hover:text-ink disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-rule disabled:hover:text-ash";
 
+  const doneClasses = idea.done ? "opacity-50" : "";
+
   return (
     <>
-      <li className="grid grid-cols-[auto_1fr_auto] items-start gap-4 py-4 md:gap-6">
+      <li
+        className={`grid grid-cols-[auto_1fr_auto] items-start gap-4 py-4 md:gap-6 ${doneClasses}`}
+      >
         <div className="flex flex-col items-center gap-1">
           <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-ash">
             #{position}
@@ -445,6 +457,11 @@ function IdeaRow({
             <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-ash shrink-0">
               {idea.type}
             </span>
+            {idea.done && (
+              <span className="border border-rule px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.15em] text-ash shrink-0">
+                ✓ done
+              </span>
+            )}
             {editing ? (
               <input
                 autoFocus
@@ -460,7 +477,9 @@ function IdeaRow({
             ) : (
               <button
                 onClick={onStartEdit}
-                className="text-left font-display text-2xl font-medium leading-tight tracking-tight hover:text-accent"
+                className={`text-left font-display text-2xl font-medium leading-tight tracking-tight hover:text-accent ${
+                  idea.done ? "line-through decoration-ash/60" : ""
+                }`}
               >
                 {idea.title || (
                   <span className="italic text-ash">Untitled idea…</span>
@@ -472,12 +491,22 @@ function IdeaRow({
             selected={idea.channels}
             onChange={(channels) => onUpdate({ channels })}
           />
+          {idea.done && idea.doneAt && (
+            <p className="font-mono text-[10px] uppercase tracking-[0.15em] text-ash">
+              Done {new Date(idea.doneAt).toLocaleDateString()}
+            </p>
+          )}
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-2">
-          <button onClick={onConvert} className="btn-ghost">
-            → Video
+          <button onClick={onToggleDone} className="btn-ghost">
+            {idea.done ? "↺ Reopen" : "✓ Mark done"}
           </button>
+          {!idea.done && (
+            <button onClick={onConvert} className="btn-ghost">
+              → Video
+            </button>
+          )}
           <button
             onClick={() => setConfirmDelete(true)}
             className="btn-danger"
@@ -490,7 +519,7 @@ function IdeaRow({
       <ConfirmDialog
         open={confirmDelete}
         title="Delete this idea?"
-        message={`"${idea.title || "Untitled"}" will be removed.`}
+        message={`"${idea.title || "Untitled"}" will be removed permanently. Marking it done keeps it as a record — delete only if you'll never want to see it again.`}
         confirmLabel="Delete"
         destructive
         onConfirm={() => {

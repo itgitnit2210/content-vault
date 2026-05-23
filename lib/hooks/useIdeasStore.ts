@@ -14,15 +14,16 @@ function readIdeas(): Idea[] {
     const parsed = JSON.parse(raw) as Idea[];
     if (!Array.isArray(parsed)) return [];
 
-    // Heal stale/duplicate/missing order values.
-    // Sort by existing order (treating missing as Infinity = end of list),
-    // then assign clean sequential numbers.
+    // Sort: not-done first (by existing order), then done (by existing order).
+    // Within each group, heal missing/duplicate order values.
     const healed = [...parsed]
       .sort((a, b) => {
+        const aDone = a.done ? 1 : 0;
+        const bDone = b.done ? 1 : 0;
+        if (aDone !== bDone) return aDone - bDone; // not-done before done
         const ao = typeof a.order === "number" ? a.order : Number.MAX_SAFE_INTEGER;
         const bo = typeof b.order === "number" ? b.order : Number.MAX_SAFE_INTEGER;
         if (ao !== bo) return ao - bo;
-        // Tie-break by updatedAt descending so newer items rank higher
         return (
           new Date(b.updatedAt || 0).getTime() -
           new Date(a.updatedAt || 0).getTime()
@@ -30,7 +31,6 @@ function readIdeas(): Idea[] {
       })
       .map((idea, i) => ({ ...idea, order: i }));
 
-    // Only write back if anything actually changed
     const changed =
       healed.length !== parsed.length ||
       healed.some((h, i) => h.order !== parsed[i]?.order);
@@ -50,13 +50,16 @@ function writeIdeas(ideas: Idea[]) {
   }
 }
 
-/**
- * Recompute order values so they're a clean 0,1,2,... sequence based on
- * current array position (not stored order). Caller is responsible for
- * arranging the array in the desired order before passing it in.
- */
+/** Renumber order based on array position. */
 function normalizeOrder(ideas: Idea[]): Idea[] {
   return ideas.map((idea, i) => ({ ...idea, order: i }));
+}
+
+/** Push done items to the bottom while preserving relative order within each group. */
+function sinkDone(ideas: Idea[]): Idea[] {
+  const active = ideas.filter((i) => !i.done);
+  const done = ideas.filter((i) => i.done);
+  return [...active, ...done];
 }
 
 interface IdeasStore {
@@ -70,6 +73,7 @@ interface IdeasStore {
   ) => string;
   update: (id: string, patch: Partial<Omit<Idea, "id" | "createdAt">>) => void;
   remove: (id: string) => void;
+  toggleDone: (id: string) => void;
   moveUp: (id: string) => void;
   moveDown: (id: string) => void;
   moveToTop: (id: string) => void;
@@ -81,7 +85,6 @@ export const useIdeasStore = create<IdeasStore>((set, get) => ({
   loaded: false,
 
   load: () => {
-    // readIdeas() already returns a healed, order-sorted array
     set({ ideas: readIdeas(), loaded: true });
   },
 
@@ -92,12 +95,15 @@ export const useIdeasStore = create<IdeasStore>((set, get) => ({
       type,
       title,
       channels,
-      order: 0, // will be set by normalizeOrder
+      order: 0,
       createdAt: now,
       updatedAt: now,
     };
-    // New ideas go to the top of the list
-    const next = normalizeOrder([newIdea, ...get().ideas]);
+    // New ideas go to the top of the *active* section
+    const current = get().ideas;
+    const active = current.filter((i) => !i.done);
+    const done = current.filter((i) => i.done);
+    const next = normalizeOrder([newIdea, ...active, ...done]);
     writeIdeas(next);
     set({ ideas: next });
     return newIdea.id;
@@ -119,11 +125,30 @@ export const useIdeasStore = create<IdeasStore>((set, get) => ({
     set({ ideas: next });
   },
 
+  toggleDone: (id) => {
+    const now = new Date().toISOString();
+    const updated = get().ideas.map((i) =>
+      i.id === id
+        ? {
+            ...i,
+            done: !i.done,
+            doneAt: !i.done ? now : undefined,
+            updatedAt: now,
+          }
+        : i
+    );
+    // After toggling, sink done items so the list visually reorganizes
+    const next = normalizeOrder(sinkDone(updated));
+    writeIdeas(next);
+    set({ ideas: next });
+  },
+
   moveUp: (id) => {
     const ideas = [...get().ideas];
     const idx = ideas.findIndex((i) => i.id === id);
     if (idx <= 0) return;
-    // Swap positions in the array
+    // Don't allow moving across the done/active boundary
+    if (ideas[idx].done !== ideas[idx - 1].done) return;
     [ideas[idx - 1], ideas[idx]] = [ideas[idx], ideas[idx - 1]];
     const next = normalizeOrder(ideas);
     writeIdeas(next);
@@ -134,6 +159,7 @@ export const useIdeasStore = create<IdeasStore>((set, get) => ({
     const ideas = [...get().ideas];
     const idx = ideas.findIndex((i) => i.id === id);
     if (idx < 0 || idx >= ideas.length - 1) return;
+    if (ideas[idx].done !== ideas[idx + 1].done) return;
     [ideas[idx], ideas[idx + 1]] = [ideas[idx + 1], ideas[idx]];
     const next = normalizeOrder(ideas);
     writeIdeas(next);
@@ -143,22 +169,42 @@ export const useIdeasStore = create<IdeasStore>((set, get) => ({
   moveToTop: (id) => {
     const ideas = [...get().ideas];
     const idx = ideas.findIndex((i) => i.id === id);
-    if (idx <= 0) return;
-    const [target] = ideas.splice(idx, 1);
-    ideas.unshift(target);
-    const next = normalizeOrder(ideas);
-    writeIdeas(next);
-    set({ ideas: next });
+    if (idx < 0) return;
+    const target = ideas[idx];
+    const rest = ideas.filter((i) => i.id !== id);
+    let next: Idea[];
+    if (target.done) {
+      // Move to top of the done section (i.e. first done item)
+      const firstDoneIdx = rest.findIndex((i) => i.done);
+      const insertAt = firstDoneIdx === -1 ? rest.length : firstDoneIdx;
+      next = [...rest.slice(0, insertAt), target, ...rest.slice(insertAt)];
+    } else {
+      // Move to absolute top
+      next = [target, ...rest];
+    }
+    const final = normalizeOrder(next);
+    writeIdeas(final);
+    set({ ideas: final });
   },
 
   moveToBottom: (id) => {
     const ideas = [...get().ideas];
     const idx = ideas.findIndex((i) => i.id === id);
-    if (idx < 0 || idx >= ideas.length - 1) return;
-    const [target] = ideas.splice(idx, 1);
-    ideas.push(target);
-    const next = normalizeOrder(ideas);
-    writeIdeas(next);
-    set({ ideas: next });
+    if (idx < 0) return;
+    const target = ideas[idx];
+    const rest = ideas.filter((i) => i.id !== id);
+    let next: Idea[];
+    if (target.done) {
+      // Move to absolute bottom
+      next = [...rest, target];
+    } else {
+      // Move to bottom of active section (just before the first done item)
+      const firstDoneIdx = rest.findIndex((i) => i.done);
+      const insertAt = firstDoneIdx === -1 ? rest.length : firstDoneIdx;
+      next = [...rest.slice(0, insertAt), target, ...rest.slice(insertAt)];
+    }
+    const final = normalizeOrder(next);
+    writeIdeas(final);
+    set({ ideas: final });
   },
 }));
