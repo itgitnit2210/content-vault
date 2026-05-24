@@ -147,7 +147,7 @@ export async function rebuildIndex(): Promise<number> {
     (a, b) =>
       new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
   );
-  writeIndex(entries.map((v) => ({
+  writeIndex(entries.map((v, i) => ({
     id: v.id,
     type: v.type,
     status: v.status,
@@ -155,6 +155,7 @@ export async function rebuildIndex(): Promise<number> {
     thumbnailId: v.thumbnailId,
     tagsPreview: v.tags.slice(0, 4),
     channels: v.channels ?? [],
+    order: v.order ?? i,
     updatedAt: v.updatedAt,
     scriptPreview: Object.values(v.scripts).find((s) => s?.trim())?.slice(0, 160) ?? "",
   })));

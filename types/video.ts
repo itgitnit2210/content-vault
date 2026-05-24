@@ -44,6 +44,7 @@ export interface Video {
   notes: string;
   tags: string[];
   channels: string[];
+  order: number;
   createdAt: string;
   updatedAt: string;
   versions?: VideoVersion[];
@@ -58,6 +59,7 @@ export interface VideoIndexEntry {
   thumbnailId?: string;
   tagsPreview: string[];
   channels: string[];
+  order: number;
   updatedAt: string;
   scriptPreview: string;
 }
@@ -77,6 +79,7 @@ export function emptyVideo(type: VideoType): Video {
     notes: "",
     tags: [],
     channels: [],
+    order: 0,
     createdAt: now,
     updatedAt: now,
   };

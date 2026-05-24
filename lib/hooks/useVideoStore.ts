@@ -8,6 +8,10 @@ import {
   readIndex,
   upsertIndexEntry,
   removeIndexEntry,
+  moveVideoUp,
+  moveVideoDown,
+  moveVideoToTop,
+  moveVideoToBottom,
 } from "@/lib/storage/index";
 import {
   getVideo,
@@ -31,6 +35,10 @@ interface Store {
   remove: (id: string) => Promise<void>;
   duplicate: (id: string) => Promise<string | undefined>;
   fetch: (id: string) => Promise<Video | undefined>;
+  moveUp: (id: string) => void;
+  moveDown: (id: string) => void;
+  moveToTop: (id: string) => void;
+  moveToBottom: (id: string) => void;
 }
 
 const MAX_VERSIONS = 3;
@@ -40,12 +48,8 @@ export const useVideoStore = create<Store>((set, get) => ({
   loaded: false,
 
   load: () => {
-    const idx = readIndex();
-    idx.sort(
-      (a, b) =>
-        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-    );
-    set({ index: idx, loaded: true });
+    // readIndex() now returns an already-sorted, healed array
+    set({ index: readIndex(), loaded: true });
   },
 
   create: async (type) => {
@@ -86,7 +90,6 @@ export const useVideoStore = create<Store>((set, get) => ({
         updated.versions = versions;
       }
     } else {
-      // Preserve existing versions
       const existing = await getVideo(video.id);
       if (existing?.versions) updated.versions = existing.versions;
     }
@@ -127,4 +130,24 @@ export const useVideoStore = create<Store>((set, get) => ({
   },
 
   fetch: async (id) => getVideo(id),
+
+  moveUp: (id) => {
+    moveVideoUp(id);
+    get().load();
+  },
+
+  moveDown: (id) => {
+    moveVideoDown(id);
+    get().load();
+  },
+
+  moveToTop: (id) => {
+    moveVideoToTop(id);
+    get().load();
+  },
+
+  moveToBottom: (id) => {
+    moveVideoToBottom(id);
+    get().load();
+  },
 }));

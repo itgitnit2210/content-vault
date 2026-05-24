@@ -11,6 +11,9 @@ import {
   importBackup,
   downloadBlob,
 } from "@/lib/storage/backup";
+import { VideoListRow } from "@/components/dashboard/VideoListRow";
+
+const VIEW_PREF_KEY = "content-vault:dashboard-view";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -21,12 +24,30 @@ export default function DashboardPage() {
     status: "all",
     channel: "all",
   });
+  const [view, setView] = useState<"grid" | "list">("grid");
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     load();
+    // Restore preferred view
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem(VIEW_PREF_KEY);
+      if (saved === "list" || saved === "grid") setView(saved);
+    }
   }, [load]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem(VIEW_PREF_KEY, view);
+    }
+  }, [view]);
+
+  const filtersActive =
+    filters.search.trim() !== "" ||
+    filters.type !== "all" ||
+    filters.status !== "all" ||
+    filters.channel !== "all";
 
   const filtered = useMemo(() => {
     const q = filters.search.trim().toLowerCase();
@@ -82,7 +103,7 @@ export default function DashboardPage() {
   return (
     <PageShell
       title="Vault"
-      subtitle="Scripts, captions, thumbnails. One workshop for everything that's not yet on camera."
+      subtitle="Scripts, captions, thumbnails. Top of the list = next video to make."
       actions={
         <>
           <button
@@ -126,6 +147,40 @@ export default function DashboardPage() {
         showing={filtered.length}
       />
 
+      {/* View toggle */}
+      {loaded && index.length > 0 && (
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="label">View</span>
+            <button
+              onClick={() => setView("grid")}
+              className={`font-mono text-[10px] uppercase tracking-[0.15em] transition ${
+                view === "grid"
+                  ? "border-b border-ink text-ink"
+                  : "text-ash hover:text-ink"
+              }`}
+            >
+              Grid
+            </button>
+            <button
+              onClick={() => setView("list")}
+              className={`font-mono text-[10px] uppercase tracking-[0.15em] transition ${
+                view === "list"
+                  ? "border-b border-ink text-ink"
+                  : "text-ash hover:text-ink"
+              }`}
+            >
+              List (reorder)
+            </button>
+          </div>
+          {view === "list" && filtersActive && (
+            <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-ash">
+              Clear filters to reorder
+            </span>
+          )}
+        </div>
+      )}
+
       {!loaded ? (
         <p className="text-ash">Loading…</p>
       ) : index.length === 0 ? (
@@ -134,12 +189,25 @@ export default function DashboardPage() {
         <p className="border border-dashed border-rule p-12 text-center text-ash">
           No videos match the current filters.
         </p>
-      ) : (
+      ) : view === "grid" ? (
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((entry) => (
             <VideoCard key={entry.id} entry={entry} />
           ))}
         </div>
+      ) : (
+        <ol className="divide-y divide-rule border-y border-rule">
+          {filtered.map((entry, idx) => (
+            <VideoListRow
+              key={entry.id}
+              entry={entry}
+              position={idx + 1}
+              isFirst={idx === 0}
+              isLast={idx === filtered.length - 1}
+              reorderEnabled={!filtersActive}
+            />
+          ))}
+        </ol>
       )}
     </PageShell>
   );
