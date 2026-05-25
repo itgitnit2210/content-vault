@@ -11,6 +11,7 @@ const config: Config = {
         rule: "#d9d2c2",
         accent: "#c2410c",
         accentSoft: "#fed7aa",
+        highlight: "#fde68a",
       },
       fontFamily: {
         display: ['"Fraunces"', "Georgia", "serif"],

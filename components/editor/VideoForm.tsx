@@ -139,7 +139,11 @@ export function VideoForm({ initial }: { initial: Video }) {
 
         <ScriptEditor
           scripts={video.scripts}
+          highlights={video.scriptHighlights ?? {}}
           onChange={(scripts) => update("scripts", scripts)}
+          onHighlightsChange={(scriptHighlights) =>
+            update("scriptHighlights", scriptHighlights)
+          }
         />
 
         <div className="space-y-4">

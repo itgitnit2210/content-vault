@@ -25,6 +25,18 @@ export const videoSchema = z.object({
   status: videoStatusSchema,
   title: z.string(),
   scripts: z.record(z.string(), z.string()),
+  scriptHighlights: z
+    .record(
+      z.string(),
+      z.array(
+        z.object({
+          start: z.number(),
+          end: z.number(),
+          text: z.string(),
+        })
+      )
+    )
+    .optional(),
   thumbnailId: z.string().optional(),
   platforms: z.object({
     youtube: platformContentSchema.optional(),
