@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 
+export type HighlightColor = "yellow" | "green";
+
 export interface Highlight {
   /** Start character offset in the text */
   start: number;
@@ -9,6 +11,8 @@ export interface Highlight {
   end: number;
   /** The actual highlighted text — used to re-locate after edits */
   text: string;
+  /** Color — defaults to yellow for backward compatibility */
+  color?: HighlightColor;
 }
 
 interface Props {
@@ -21,10 +25,14 @@ interface Props {
   className?: string;
 }
 
+const COLOR_CLASS: Record<HighlightColor, string> = {
+  yellow: "bg-highlight",
+  green: "bg-highlightGreen",
+};
+
 /**
- * Textarea that supports persistent text highlights.
+ * Textarea that supports persistent text highlights in multiple colors.
  * Highlights are rendered via an absolutely-positioned mirror div behind the textarea.
- * The textarea text is transparent; the mirror shows the actual visible text + highlight spans.
  */
 export function HighlightableTextarea({
   value,
@@ -39,7 +47,6 @@ export function HighlightableTextarea({
   const mirrorRef = useRef<HTMLDivElement>(null);
   const [hasSelection, setHasSelection] = useState(false);
 
-  /** Sync scroll position between textarea and mirror */
   const syncScroll = useCallback(() => {
     if (textareaRef.current && mirrorRef.current) {
       mirrorRef.current.scrollTop = textareaRef.current.scrollTop;
@@ -51,17 +58,13 @@ export function HighlightableTextarea({
     syncScroll();
   }, [value, highlights, syncScroll]);
 
-  /** Re-locate highlights after text changes */
   const relocateHighlights = useCallback(
     (newText: string): Highlight[] => {
       return highlights
         .map((h) => {
-          // First, check if the highlight is still in the same place
           if (newText.slice(h.start, h.end) === h.text) {
             return h;
           }
-          // Otherwise, search for the text near the original position
-          // Look within a reasonable window around the old start position
           const searchStart = Math.max(0, h.start - 100);
           const searchEnd = Math.min(newText.length, h.start + h.text.length + 100);
           const window = newText.slice(searchStart, searchEnd);
@@ -70,12 +73,10 @@ export function HighlightableTextarea({
             const newStart = searchStart + localIdx;
             return { ...h, start: newStart, end: newStart + h.text.length };
           }
-          // Try one more time searching the whole string
           const globalIdx = newText.indexOf(h.text);
           if (globalIdx >= 0) {
             return { ...h, start: globalIdx, end: globalIdx + h.text.length };
           }
-          // Couldn't find it — drop the highlight
           return null;
         })
         .filter((h): h is Highlight => h !== null);
@@ -100,8 +101,8 @@ export function HighlightableTextarea({
     setHasSelection(ta.selectionStart !== ta.selectionEnd);
   };
 
-  /** Add a highlight from current selection */
-  const handleHighlight = () => {
+  /** Add a highlight from current selection in the given color */
+  const handleHighlight = (color: HighlightColor) => {
     const ta = textareaRef.current;
     if (!ta) return;
     const start = ta.selectionStart;
@@ -110,34 +111,59 @@ export function HighlightableTextarea({
     const text = value.slice(start, end);
     if (!text.trim()) return;
 
-    // Merge overlapping highlights, recomputing text from source for merged ranges
-    const all = [...highlights, { start, end, text }].sort(
-      (a, b) => a.start - b.start
+    // If the selection exactly matches an existing highlight, replace its color.
+    // Otherwise, remove any overlapping highlights first, then add the new one.
+    // This means selecting a yellow highlight and clicking green converts it.
+    const overlap = highlights.filter(
+      (h) => !(h.end <= start || h.start >= end)
     );
+    const nonOverlap = highlights.filter(
+      (h) => h.end <= start || h.start >= end
+    );
+
+    // If selection fully contains all overlapping highlights, treat as recolor:
+    // span the full selection. Otherwise, merge so the union is highlighted.
+    let newStart = start;
+    let newEnd = end;
+    for (const h of overlap) {
+      newStart = Math.min(newStart, h.start);
+      newEnd = Math.max(newEnd, h.end);
+    }
+    const newHl: Highlight = {
+      start: newStart,
+      end: newEnd,
+      text: value.slice(newStart, newEnd),
+      color,
+    };
+
+    // Merge with adjacent highlights of the SAME color only
     const merged: Highlight[] = [];
-    for (const h of all) {
+    const candidates = [...nonOverlap, newHl].sort((a, b) => a.start - b.start);
+    for (const h of candidates) {
       const last = merged[merged.length - 1];
-      if (last && h.start <= last.end) {
+      if (
+        last &&
+        h.start <= last.end &&
+        (last.color ?? "yellow") === (h.color ?? "yellow")
+      ) {
         last.end = Math.max(last.end, h.end);
         last.text = value.slice(last.start, last.end);
       } else {
         merged.push({ ...h });
       }
     }
-    onHighlightsChange(merged);
 
-    // Re-focus to keep editing flow smooth
+    onHighlightsChange(merged);
     ta.focus();
   };
 
-  /** Remove highlights that overlap with current selection */
+  /** Remove highlights at cursor or overlapping selection */
   const handleUnhighlight = () => {
     const ta = textareaRef.current;
     if (!ta) return;
     const selStart = ta.selectionStart;
     const selEnd = ta.selectionEnd;
 
-    // If nothing selected, find the highlight at cursor position and remove it
     if (selStart === selEnd) {
       const next = highlights.filter(
         (h) => !(selStart >= h.start && selStart <= h.end)
@@ -149,7 +175,6 @@ export function HighlightableTextarea({
       return;
     }
 
-    // Otherwise, remove any highlight that overlaps the selection
     const next = highlights.filter(
       (h) => h.end <= selStart || h.start >= selEnd
     );
@@ -157,7 +182,6 @@ export function HighlightableTextarea({
     ta.focus();
   };
 
-  /** Render text with highlight spans for the mirror */
   const renderedSegments = buildSegments(value, highlights);
 
   return (
@@ -165,12 +189,21 @@ export function HighlightableTextarea({
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <button
           type="button"
-          onClick={handleHighlight}
+          onClick={() => handleHighlight("yellow")}
           disabled={!hasSelection}
           className="border border-rule bg-highlight/60 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.15em] text-ink transition hover:border-ink disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-rule"
-          title="Highlight selected text"
+          title="Highlight selected text yellow"
         >
-          ▮ Highlight
+          ▮ Yellow
+        </button>
+        <button
+          type="button"
+          onClick={() => handleHighlight("green")}
+          disabled={!hasSelection}
+          className="border border-rule bg-highlightGreen/60 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.15em] text-ink transition hover:border-ink disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-rule"
+          title="Highlight selected text green"
+        >
+          ▮ Green
         </button>
         <button
           type="button"
@@ -191,26 +224,22 @@ export function HighlightableTextarea({
           </button>
         )}
         <span className="ml-auto font-mono text-[10px] uppercase tracking-[0.15em] text-ash">
-          Select text, then click highlight
+          Select text, pick a color
         </span>
       </div>
 
       <div className="relative">
-        {/* Mirror div — shows highlighted version under the textarea */}
         <div
           ref={mirrorRef}
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words border border-transparent p-3 font-body text-base leading-relaxed text-transparent"
-          style={{
-            // Match textarea typography exactly
-            wordBreak: "break-word",
-          }}
+          style={{ wordBreak: "break-word" }}
         >
           {renderedSegments.map((seg, i) =>
             seg.highlighted ? (
               <mark
                 key={i}
-                className="bg-highlight text-transparent"
+                className={`${COLOR_CLASS[seg.color ?? "yellow"]} text-transparent`}
                 style={{ borderRadius: 0 }}
               >
                 {seg.text}
@@ -219,11 +248,9 @@ export function HighlightableTextarea({
               <span key={i}>{seg.text}</span>
             )
           )}
-          {/* Trailing newline space so the last line gets measured */}
           {"\n"}
         </div>
 
-        {/* The real textarea — text is visible, background is transparent so mirror shows through */}
         <textarea
           ref={textareaRef}
           value={value}
@@ -235,9 +262,7 @@ export function HighlightableTextarea({
           rows={rows}
           placeholder={placeholder}
           className="relative w-full border border-rule bg-transparent p-3 font-body text-base leading-relaxed text-ink placeholder:text-ash/50 focus:border-ink focus:outline-none"
-          style={{
-            wordBreak: "break-word",
-          }}
+          style={{ wordBreak: "break-word" }}
         />
       </div>
     </div>
@@ -247,15 +272,14 @@ export function HighlightableTextarea({
 interface Segment {
   text: string;
   highlighted: boolean;
+  color?: HighlightColor;
 }
 
-/** Split text into highlighted/non-highlighted segments for rendering */
 function buildSegments(text: string, highlights: Highlight[]): Segment[] {
   if (highlights.length === 0) {
     return [{ text, highlighted: false }];
   }
 
-  // Sort highlights by start position; assume non-overlapping (mergeHighlight enforces this)
   const sorted = [...highlights].sort((a, b) => a.start - b.start);
   const segments: Segment[] = [];
   let cursor = 0;
@@ -267,6 +291,7 @@ function buildSegments(text: string, highlights: Highlight[]): Segment[] {
     segments.push({
       text: text.slice(h.start, h.end),
       highlighted: true,
+      color: h.color ?? "yellow",
     });
     cursor = h.end;
   }

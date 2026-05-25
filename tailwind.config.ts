@@ -12,6 +12,7 @@ const config: Config = {
         accent: "#c2410c",
         accentSoft: "#fed7aa",
         highlight: "#fde68a",
+        highlightGreen: "#bbf7d0",
       },
       fontFamily: {
         display: ['"Fraunces"', "Georgia", "serif"],

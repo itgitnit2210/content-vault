@@ -33,6 +33,7 @@ export const videoSchema = z.object({
           start: z.number(),
           end: z.number(),
           text: z.string(),
+          color: z.enum(["yellow", "green"]).optional(),
         })
       )
     )

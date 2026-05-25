@@ -39,7 +39,15 @@ export interface Video {
   status: VideoStatus;
   title: string;
   scripts: Record<string, string>;
-  scriptHighlights?: Record<string, Array<{ start: number; end: number; text: string }>>;
+  scriptHighlights?: Record<
+    string,
+    Array<{
+      start: number;
+      end: number;
+      text: string;
+      color?: "yellow" | "green";
+    }>
+  >;
   thumbnailId?: string;
   platforms: Partial<Record<Platform, PlatformContent>>;
   notes: string;
