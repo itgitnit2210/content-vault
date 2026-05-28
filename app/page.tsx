@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useVideoStore } from "@/lib/hooks/useVideoStore";
 import { VideoCard } from "@/components/dashboard/VideoCard";
+import { VideoListRow } from "@/components/dashboard/VideoListRow";
 import { FilterBar, type Filters } from "@/components/dashboard/FilterBar";
 import { PageShell } from "@/components/ui/PageShell";
 import {
@@ -11,7 +12,6 @@ import {
   importBackup,
   downloadBlob,
 } from "@/lib/storage/backup";
-import { VideoListRow } from "@/components/dashboard/VideoListRow";
 
 const VIEW_PREF_KEY = "content-vault:dashboard-view";
 
@@ -30,7 +30,6 @@ export default function DashboardPage() {
 
   useEffect(() => {
     load();
-    // Restore preferred view
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem(VIEW_PREF_KEY);
       if (saved === "list" || saved === "grid") setView(saved);
@@ -88,9 +87,25 @@ export default function DashboardPage() {
   const handleImport = async (file: File) => {
     setBusy(true);
     try {
-      const { imported, skipped } = await importBackup(file);
+      const result = await importBackup(file);
       load();
-      alert(`Imported ${imported} videos. Skipped ${skipped} duplicates.`);
+      // Force a reload so Ideas/Prompts/Settings pages pick up imported data
+      const lines = [
+        `Backup format: v${result.backupVersion}`,
+        `Videos: ${result.videos.imported} imported, ${result.videos.skipped} skipped (already exist)`,
+      ];
+      if (result.backupVersion === 2) {
+        lines.push(
+          `Ideas: ${result.ideas.imported} imported, ${result.ideas.skipped} skipped`,
+          `Prompts: ${result.prompts.imported} imported, ${result.prompts.skipped} skipped`,
+          `Settings: ${result.settingsMerged ? "merged" : "not present"}`
+        );
+      } else {
+        lines.push(
+          "(This is a legacy backup — only videos restored. Ideas/prompts/settings need a fresh v2 backup.)"
+        );
+      }
+      alert(lines.join("\n"));
     } catch (err) {
       alert(
         `Import failed: ${err instanceof Error ? err.message : String(err)}`
@@ -108,7 +123,7 @@ export default function DashboardPage() {
         <>
           <button
             onClick={handleExport}
-            disabled={busy || index.length === 0}
+            disabled={busy}
             className="btn-ghost disabled:opacity-40"
           >
             Export JSON
@@ -147,7 +162,6 @@ export default function DashboardPage() {
         showing={filtered.length}
       />
 
-      {/* View toggle */}
       {loaded && index.length > 0 && (
         <div className="mb-6 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">

@@ -1,6 +1,9 @@
 "use client";
 
-import { backupSchema } from "@/lib/validation";
+import {
+  backupSchemaV1,
+  backupSchemaV2,
+} from "@/lib/validation";
 import {
   getVideo,
   putVideo,
@@ -8,12 +11,25 @@ import {
   getThumbnail,
   putThumbnail,
 } from "./blobs";
-import { upsertIndexEntry, readIndex, writeIndex } from "./index";
+import {
+  upsertIndexEntry,
+  writeIndex,
+} from "./index";
 import type { Video } from "@/types/video";
+import type { Idea, Prompt, AppSettings } from "@/types/extras";
+import { DEFAULT_SETTINGS } from "@/types/extras";
+
+const IDEAS_KEY = "content-vault:ideas:v1";
+const PROMPTS_KEY = "content-vault:prompts:v1";
+const SETTINGS_KEY = "content-vault:settings:v1";
 
 interface ExportedVideo extends Video {
-  _thumbnailData?: string; // base64 data URL embedded for portability
+  _thumbnailData?: string;
 }
+
+// ============================================================================
+// EXPORT
+// ============================================================================
 
 export async function exportAll(): Promise<Blob> {
   const ids = await listVideoIds();
@@ -22,7 +38,6 @@ export async function exportAll(): Promise<Blob> {
   for (const id of ids) {
     const v = await getVideo(id);
     if (!v) continue;
-
     const exported: ExportedVideo = { ...v };
     if (v.thumbnailId) {
       const blob = await getThumbnail(v.thumbnailId);
@@ -33,21 +48,28 @@ export async function exportAll(): Promise<Blob> {
     videos.push(exported);
   }
 
+  const ideas = readLS<Idea[]>(IDEAS_KEY, []);
+  const prompts = readLS<Prompt[]>(PROMPTS_KEY, []);
+  const settings = readLS<AppSettings>(SETTINGS_KEY, DEFAULT_SETTINGS);
+
+  // Build the v2 payload. Thumbnail data is allowed as extra field on videos.
   const payload = {
-    version: 1 as const,
+    version: 2 as const,
     exportedAt: new Date().toISOString(),
+    videos,
+    ideas,
+    prompts,
+    settings,
+  };
+
+  // Validate the shape WITHOUT thumbnail data (it's not in the schema)
+  const validatePayload = {
+    ...payload,
     videos: videos.map(stripThumbDataForSchema),
   };
+  backupSchemaV2.parse(validatePayload);
 
-  // Re-attach thumb data after schema validation
-  const final = {
-    ...payload,
-    videos: videos,
-  };
-
-  backupSchema.parse(payload); // throw if shape is wrong
-
-  return new Blob([JSON.stringify(final, null, 2)], {
+  return new Blob([JSON.stringify(payload, null, 2)], {
     type: "application/json",
   });
 }
@@ -57,31 +79,84 @@ function stripThumbDataForSchema(v: ExportedVideo): Video {
   return rest;
 }
 
-export async function importBackup(file: File): Promise<{
-  imported: number;
-  skipped: number;
-}> {
+// ============================================================================
+// IMPORT
+// ============================================================================
+
+export interface ImportResult {
+  videos: { imported: number; skipped: number };
+  ideas: { imported: number; skipped: number };
+  prompts: { imported: number; skipped: number };
+  settingsMerged: boolean;
+  backupVersion: 1 | 2;
+}
+
+export async function importBackup(file: File): Promise<ImportResult> {
   const text = await file.text();
   const json = JSON.parse(text);
 
-  // Validate shape (thumbnail data is allowed as extra field)
-  const validation = backupSchema.safeParse({
+  // Detect version
+  const version = json.version === 2 ? 2 : 1;
+
+  // Strip thumb data for schema validation
+  const forValidation = {
     ...json,
     videos: json.videos?.map((v: ExportedVideo) => {
       const { _thumbnailData, ...rest } = v;
       return rest;
     }),
-  });
+  };
 
-  if (!validation.success) {
-    throw new Error(`Invalid backup file: ${validation.error.message}`);
+  if (version === 2) {
+    const parsed = backupSchemaV2.safeParse(forValidation);
+    if (!parsed.success) {
+      throw new Error(`Invalid v2 backup: ${parsed.error.message}`);
+    }
+  } else {
+    const parsed = backupSchemaV1.safeParse(forValidation);
+    if (!parsed.success) {
+      throw new Error(`Invalid v1 backup: ${parsed.error.message}`);
+    }
   }
 
+  // Import videos (same logic for both versions)
+  const videoResult = await importVideos(json.videos ?? []);
+
+  // v2 additions
+  let ideaResult = { imported: 0, skipped: 0 };
+  let promptResult = { imported: 0, skipped: 0 };
+  let settingsMerged = false;
+
+  if (version === 2) {
+    if (Array.isArray(json.ideas)) {
+      ideaResult = importIdeas(json.ideas);
+    }
+    if (Array.isArray(json.prompts)) {
+      promptResult = importPrompts(json.prompts);
+    }
+    if (json.settings && typeof json.settings === "object") {
+      mergeSettings(json.settings);
+      settingsMerged = true;
+    }
+  }
+
+  return {
+    videos: videoResult,
+    ideas: ideaResult,
+    prompts: promptResult,
+    settingsMerged,
+    backupVersion: version,
+  };
+}
+
+async function importVideos(
+  videos: ExportedVideo[]
+): Promise<{ imported: number; skipped: number }> {
   const existingIds = new Set(await listVideoIds());
   let imported = 0;
   let skipped = 0;
 
-  for (const exported of json.videos as ExportedVideo[]) {
+  for (const exported of videos) {
     if (existingIds.has(exported.id)) {
       skipped++;
       continue;
@@ -97,10 +172,11 @@ export async function importBackup(file: File): Promise<{
       }
     }
 
+    const { _thumbnailData, ...rest } = exported;
     const video: Video = {
-      ...stripThumbDataForSchema(exported),
+      ...rest,
       thumbnailId,
-    };
+    } as Video;
 
     await putVideo(video);
     upsertIndexEntry(video);
@@ -109,6 +185,75 @@ export async function importBackup(file: File): Promise<{
 
   return { imported, skipped };
 }
+
+function importIdeas(incoming: Idea[]): { imported: number; skipped: number } {
+  const existing = readLS<Idea[]>(IDEAS_KEY, []);
+  const existingIds = new Set(existing.map((i) => i.id));
+  let imported = 0;
+  let skipped = 0;
+
+  const toAdd: Idea[] = [];
+  for (const idea of incoming) {
+    if (existingIds.has(idea.id)) {
+      skipped++;
+    } else {
+      toAdd.push(idea);
+      imported++;
+    }
+  }
+
+  if (toAdd.length > 0) {
+    // Append imported ideas after existing ones, then renumber
+    const merged = [...existing, ...toAdd];
+    const normalized = merged.map((idea, i) => ({ ...idea, order: i }));
+    writeLS(IDEAS_KEY, normalized);
+  }
+
+  return { imported, skipped };
+}
+
+function importPrompts(
+  incoming: Prompt[]
+): { imported: number; skipped: number } {
+  const existing = readLS<Prompt[]>(PROMPTS_KEY, []);
+  const existingIds = new Set(existing.map((p) => p.id));
+  let imported = 0;
+  let skipped = 0;
+
+  const toAdd: Prompt[] = [];
+  for (const prompt of incoming) {
+    if (existingIds.has(prompt.id)) {
+      skipped++;
+    } else {
+      toAdd.push(prompt);
+      imported++;
+    }
+  }
+
+  if (toAdd.length > 0) {
+    writeLS(PROMPTS_KEY, [...toAdd, ...existing]);
+  }
+
+  return { imported, skipped };
+}
+
+function mergeSettings(incoming: AppSettings): void {
+  const existing = readLS<AppSettings>(SETTINGS_KEY, DEFAULT_SETTINGS);
+  // Union of channel names, preserving existing order then appending new
+  const seen = new Set(existing.channels);
+  const merged = [...existing.channels];
+  for (const c of incoming.channels ?? []) {
+    if (!seen.has(c)) {
+      merged.push(c);
+      seen.add(c);
+    }
+  }
+  writeLS(SETTINGS_KEY, { ...existing, channels: merged });
+}
+
+// ============================================================================
+// HELPERS
+// ============================================================================
 
 export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -135,10 +280,29 @@ async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
   return res.blob();
 }
 
-/** Rebuild the localStorage index from IndexedDB (e.g., after switching browsers) */
+function readLS<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeLS<T>(key: string, value: T): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (err) {
+    console.error(`Failed to write ${key}`, err);
+  }
+}
+
+/** Rebuild the localStorage index from IndexedDB */
 export async function rebuildIndex(): Promise<number> {
   const ids = await listVideoIds();
-  const entries = [];
+  const entries: Video[] = [];
   for (const id of ids) {
     const v = await getVideo(id);
     if (v) entries.push(v);
@@ -147,17 +311,20 @@ export async function rebuildIndex(): Promise<number> {
     (a, b) =>
       new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
   );
-  writeIndex(entries.map((v, i) => ({
-    id: v.id,
-    type: v.type,
-    status: v.status,
-    title: v.title,
-    thumbnailId: v.thumbnailId,
-    tagsPreview: v.tags.slice(0, 4),
-    channels: v.channels ?? [],
-    order: v.order ?? i,
-    updatedAt: v.updatedAt,
-    scriptPreview: Object.values(v.scripts).find((s) => s?.trim())?.slice(0, 160) ?? "",
-  })));
+  writeIndex(
+    entries.map((v, i) => ({
+      id: v.id,
+      type: v.type,
+      status: v.status,
+      title: v.title,
+      thumbnailId: v.thumbnailId,
+      tagsPreview: v.tags.slice(0, 4),
+      channels: v.channels ?? [],
+      order: v.order ?? i,
+      updatedAt: v.updatedAt,
+      scriptPreview:
+        Object.values(v.scripts).find((s) => s?.trim())?.slice(0, 160) ?? "",
+    }))
+  );
   return entries.length;
 }

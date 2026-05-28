@@ -53,10 +53,51 @@ export const videoSchema = z.object({
   versions: z.array(z.any()).optional(),
 });
 
-export const backupSchema = z.object({
+export const ideaSchema = z.object({
+  id: z.string(),
+  type: z.enum(["long", "short"]),
+  title: z.string(),
+  channels: z.array(z.string()),
+  notes: z.string().optional(),
+  order: z.number(),
+  done: z.boolean().optional(),
+  doneAt: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const promptSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  body: z.string(),
+  category: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const settingsSchema = z.object({
+  channels: z.array(z.string()),
+});
+
+/** v1: videos only (legacy) */
+export const backupSchemaV1 = z.object({
   version: z.literal(1),
   exportedAt: z.string(),
   videos: z.array(videoSchema),
 });
 
-export type BackupFile = z.infer<typeof backupSchema>;
+/** v2: videos + ideas + prompts + settings */
+export const backupSchemaV2 = z.object({
+  version: z.literal(2),
+  exportedAt: z.string(),
+  videos: z.array(videoSchema),
+  ideas: z.array(ideaSchema).default([]),
+  prompts: z.array(promptSchema).default([]),
+  settings: settingsSchema.optional(),
+});
+
+export type BackupFileV1 = z.infer<typeof backupSchemaV1>;
+export type BackupFileV2 = z.infer<typeof backupSchemaV2>;
+
+/** Kept for any callers still importing the legacy name */
+export const backupSchema = backupSchemaV1;
